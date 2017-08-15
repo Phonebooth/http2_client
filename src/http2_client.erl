@@ -480,7 +480,7 @@ handle_info({T, _Port, Data}, #{buffer := Buffer} = C) when T == tcp;
 handle_info({T, _Port}, #{streams := Streams} = C) when T == tcp_closed;
                                                         T == ssl_closed ->
     end_streams(Streams, ?PROTOCOL_ERROR),
-    {stop, closed_by_peer, C};
+    {stop, {shutdown, closed_by_peer}, C};
 handle_info({cleanup_stream, StreamId}, #{streams := Streams} = C) ->
     {noreply, C#{streams => remove_stream(StreamId, Streams)}};
 handle_info({ping_timeout, Opaque}, #{ping_sent := Pings} = C) ->
@@ -496,7 +496,7 @@ handle_info(_Other, C) ->
     {noreply, C}.
 
 %% @private
-terminate(closed_by_peer, _) ->
+terminate({shutdown, closed_by_peer}, _) ->
     ok;
 terminate(_Reason, #{transport := ssl, socket := Socket}) ->
     ssl:close(Socket);
