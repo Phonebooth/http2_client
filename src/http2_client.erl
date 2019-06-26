@@ -1337,7 +1337,7 @@ set_timer(Timeout, Message) -> timer:send_after(Timeout, Message).
 
 default_opts(T) when T == ssl;
                      T == gen_tcp ->
-    [{packet, raw}, {active, false}, binary];
+    [{packet, raw}, {active, false}, {alpn_advertised_protocols, [<<"h2">>]}, binary];
 default_opts(_) -> [].
 
 ping_time() -> erlang:system_time(microsecond).
