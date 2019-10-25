@@ -1162,7 +1162,7 @@ send_data_frame(Data, MaxFrameSize, Flags, Connection, Stream, Size)
   when Size =< MaxFrameSize ->
     send(Connection, data_frame(Data, Flags, Stream, Size));
 send_data_frame(Data, MaxFrameSize, Flags, Connection, Stream, Size) ->
-    <<First:MaxFrameSize, Rest/binary>> = Data,
+    <<First:MaxFrameSize/binary, Rest/binary>> = Data,
     %% There is only 1 applicable flag (END_STREAM), which will only be sent
     %% with the last packet. So for this packet flags = [].
     case send(Connection, data_frame(First, [], Stream, MaxFrameSize)) of
