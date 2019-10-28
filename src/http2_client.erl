@@ -168,6 +168,13 @@
 -define(WINDOW_UPDATE, 16#8).
 -define(CONTINUATION, 16#9).
 
+-define(SETTINGS_HEADER_TABLE_SIZE, 16#1).
+-define(SETTINGS_ENABLE_PUSH, 16#2).
+-define(SETTINGS_MAX_CONCURRENT_STREAMS, 16#3).
+-define(SETTINGS_INITIAL_WINDOW_SIZE, 16#4).
+-define(SETTINGS_MAX_FRAME_SIZE, 16#5).
+-define(SETTINGS_MAX_HEADER_LIST_SIZE, 16#6).
+
 -type stream_id() :: integer().
 -type header() :: [{Name::binary, Value::binary()}].
 -type send_option() :: {end_stream, boolean()}.
@@ -560,7 +567,7 @@ parse_server_settings(<<>>, Connection) ->
 parse_server_settings(<<Type:16, Value:32, Rest/binary>>,
                       #{server_settings := Settings} = Connection) ->
     case parse_setting(Type, Value) of
-        ok ->
+        {error, {not_implemented, _, _}} ->
             parse_server_settings(Rest, Connection);
         {ok, K, V} ->
             parse_server_settings(Rest, 
@@ -591,20 +598,20 @@ receive_ack(Connection) ->
     active_once(Connection),
     {ok, Connection}.
 
-parse_setting(16#1, Value) ->
+parse_setting(?SETTINGS_HEADER_TABLE_SIZE, Value) ->
     {ok, header_table_size, Value};
-parse_setting(16#4, Value) when Value =< 2147483647 ->
+parse_setting(?SETTINGS_INITIAL_WINDOW_SIZE, Value) when Value =< 2147483647 ->
     {ok, initial_window_size, Value};
-parse_setting(16#4, _) ->
+parse_setting(?SETTINGS_INITIAL_WINDOW_SIZE, _) ->
     {error, wrong_value_for_initial_window_size};
-parse_setting(16#5, Value) when Value >= 16384, 
+parse_setting(?SETTINGS_MAX_FRAME_SIZE, Value) when Value >= 16384, 
                                 Value =< 16777215 ->
     {ok, max_frame_size, Value};
-parse_setting(16#5, _) ->
+parse_setting(?SETTINGS_MAX_FRAME_SIZE, _) ->
     {error, wrong_value_for_max_frame_size};
 %% TODO
-parse_setting(_, _) ->
-    ok.
+parse_setting(Id, Value) ->
+    {error, {not_implemented, Id, Value}}.
 
 
 %%    +-----------------------------------------------+
@@ -795,10 +802,36 @@ handle_window_update(_Flags, StreamId, <<_R:1, Increment:31>>, _Size,
 
 handle_settings(_Flags, StreamId, _Data, _Size, C) when StreamId /= 0 ->
     connection_error(C, ?PROTOCOL_ERROR);
+handle_settings(_Flags, _StreamId, _Data, Size, C) when Size rem 6 /= 0 ->
+    connection_error(C, ?FRAME_SIZE_ERROR);
 handle_settings([?ACK], _, _Data, _Size, C) ->
     %% Ack is ignored.
-    C.
-%% TODO: other SETTINGS frames.
+    C;
+handle_settings(Flags, StreamId, Data, Size, C) ->
+    handle_settings_parameters(Flags, StreamId, Data, Size, C).
+
+handle_settings_parameters(_, _, <<>>, _Size, C) ->
+    C;
+handle_settings_parameters(Flags, StreamId, <<Identifier:16, Value:32, Rest/binary>>, Size, 
+                           C=#{streams := Streams, server_settings := Settings}) ->
+    {ok, K2, V2, C2} = case parse_setting(Identifier, Value) of
+        {ok, initial_window_size=K, V} ->
+            OldInitialWindowSize = maps:get(K, Settings),
+            Difference = V - OldInitialWindowSize,
+            % all current streams must be adjusted by adding this difference
+            Streams2 = lists:map(
+                         fun(Stream=#{server_window := ServerWindow}) ->
+                                 % (it can go negative. This is allowed by the spec)
+                                 Stream#{server_window => ServerWindow + Difference}
+                         end, Streams),
+            {ok, K, V, C#{streams => Streams2}};
+        {ok, K, V} ->
+            {ok, K, V, C}
+    end,
+    {ok, AckFrame} = settings_ack_frame(),
+    send(C2, AckFrame),
+    handle_settings_parameters(Flags, StreamId, Rest, Size-6, C2#{server_settings => Settings#{K2 => V2}}).
+
 
 %%    +---------------+
 %%    |Pad Length? (8)|
