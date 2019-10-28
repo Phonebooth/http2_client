@@ -820,9 +820,9 @@ handle_settings_parameters(Flags, StreamId, <<Identifier:16, Value:32, Rest/bina
             Difference = V - OldInitialWindowSize,
             % all current streams must be adjusted by adding this difference
             Streams2 = lists:map(
-                         fun(Stream=#{server_window := ServerWindow}) ->
+                         fun({StreamId0, Stream=#{server_window := ServerWindow}}) ->
                                  % (it can go negative. This is allowed by the spec)
-                                 Stream#{server_window => ServerWindow + Difference}
+                                 {StreamId0, Stream#{server_window => ServerWindow + Difference}}
                          end, Streams),
             {ok, K, V, C#{streams => Streams2}};
         {ok, K, V} ->
