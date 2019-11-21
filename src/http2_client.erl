@@ -119,6 +119,7 @@
 
 -export([new_connection/4, 
          new_stream/2,
+         new_stream_with_headers/3,
          send_headers/4,
          send_data/4,
          rst_stream/3,
@@ -274,6 +275,9 @@ close(Pid) ->
 new_stream(Connection, Options) ->
     gen_server:call(Connection, {new_stream, Options}).
 
+new_stream_with_headers(Connection, Headers, Options) ->
+    gen_server:call(Connection, {new_stream, Headers, Options}).
+
 -spec send_headers(connection(), stream_id(), [header()],
                    Options::[send_option()]) -> ok | {error, term()}.
 %% @doc Send headers.
@@ -420,6 +424,8 @@ handle_call({new_stream, Options}, From, #{streams := Streams,
         {error, _} = Error ->
             {reply, Error, C}
     end;
+handle_call({new_stream, Headers, Options}, From, C) ->
+    new_stream_with_headers(C, From, Headers, Options);
 
 %% HEADERS frames can be sent on a stream in the "idle", "reserved (local)",
 %% "open", or "half-closed (remote)" state.
@@ -1224,6 +1230,19 @@ new_stream(#{last_stream := Last,
                                                    Options, undefined),
            client_initial_window => ClientWindow,
            server_window => ServerWindow}}.
+
+new_stream_with_headers(C = #{streams := Streams, stream_count := Count}, From, Headers, Options) ->
+    {ok, #{id := StreamId} = Stream} = new_stream(C, From, Options),
+    C2 = C#{last_stream => StreamId,
+            streams => [{StreamId, Stream} | Streams],
+            stream_count => Count + 1},
+    case handle_call({send_headers, StreamId, Headers, Options}, From, C2) of
+        {reply, ok, Connection} -> 
+            {reply, {ok, StreamId}, Connection};
+        Error ->
+            Error
+    end.
+    
 
 default_settings() ->
     #{header_table_size => 4096,
